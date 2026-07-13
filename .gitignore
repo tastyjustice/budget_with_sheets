@@ -1,0 +1,6 @@
+.env
+tokens.json
+google_credentials.json
+*.log
+__pycache__/
+*.pyc

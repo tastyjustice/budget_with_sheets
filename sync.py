@@ -95,7 +95,8 @@ def fetch_transactions(access_token: str, days_back: int = 30) -> list[dict]:
     response = plaid_client.transactions_get(request)
 
     # Convert to plain dict to handle date serialization on Python 3.14
-    return json.loads(json.dumps(response.to_dict(), default=str))["transactions"]
+    all_transactions = json.loads(json.dumps(response.to_dict(), default=str))["transactions"]
+    return [t for t in all_transactions if not t["pending"]]
 
 
 def transactions_to_rows(txns: list[dict]) -> list[list]:

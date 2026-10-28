@@ -4,4 +4,7 @@ google_credentials.json
 *.log
 __pycache__/
 *.pyc
-.idea/workspace.xml
+.idea/
+.DS_Store
+venv/
+.venv/

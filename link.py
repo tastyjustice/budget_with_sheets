@@ -22,9 +22,6 @@ from plaid.model.country_code import CountryCode
 
 from pathlib import Path
 load_dotenv(dotenv_path=Path(__file__).parent / ".env")
-print("CLIENT_ID:", os.getenv("PLAID_CLIENT_ID"))
-print("SECRET:", os.getenv("PLAID_SECRET"))
-print("ENV:", os.getenv("PLAID_ENV"))
 
 
 PLAID_ENV = os.getenv("PLAID_ENV", "sandbox")

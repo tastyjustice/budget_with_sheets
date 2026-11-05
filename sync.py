@@ -15,7 +15,6 @@ from dotenv import load_dotenv
 
 import plaid
 from plaid import ApiException
-from plaid.api import plaid_api
 from plaid.api.plaid_api import PlaidApi
 from plaid.model.item_get_request import ItemGetRequest
 from plaid.model.transactions_get_request import TransactionsGetRequest
@@ -24,26 +23,13 @@ from plaid.model.transactions_get_request_options import TransactionsGetRequestO
 import gspread
 from google.oauth2.service_account import Credentials
 
-load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
 # ── Plaid setup ────────────────────────────────────────────────────────────────
-
-PLAID_ENV = os.getenv("PLAID_ENV", "sandbox")  # "sandbox" | "production"
 
 ENV_MAP = {
     "sandbox":    plaid.Environment.Sandbox,
     "production": plaid.Environment.Production,
 }
-
-configuration = plaid.Configuration(
-    host=ENV_MAP[PLAID_ENV],
-    api_key={
-        "clientId": os.getenv("PLAID_CLIENT_ID"),
-        "secret":   os.getenv("PLAID_SECRET"),
-    },
-)
-
-
 
 # ── Google Sheets setup ────────────────────────────────────────────────────────
 
@@ -51,16 +37,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-
-creds = Credentials.from_service_account_file(
-    Path(__file__).parent / "google_credentials.json",
-    scopes=SCOPES
-)
-gc = gspread.authorize(creds)
-
-SHEET_ID        = os.getenv("GOOGLE_SHEET_ID")
-TAB_NAME        = os.getenv("SHEET_TAB_NAME", "Transactions")
-MANUAL_TAB_NAME = os.getenv("MANUAL_TAB_NAME", "Manual")
+CREDS_FILE = Path(__file__).parent / "google_credentials.json"
 
 # Column indices (1-based for gspread)
 COL_TRANSACTION_ID = 7   # column G
@@ -69,6 +46,23 @@ COL_LOCKED         = 8   # column H
 HEADERS = ["Date", "Name", "Merchant", "Category", "Amount ($)", "Account", "Transaction ID", "Locked"]
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def open_spreadsheet(sheet_id: str) -> gspread.Spreadsheet:
+    creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
+    return gspread.authorize(creds).open_by_key(sheet_id)
+
+def build_plaid_client() -> PlaidApi:
+    env_name = os.getenv("PLAID_ENV", "sandbox").lower()
+    if env_name not in ENV_MAP:
+        raise SystemExit(f"Unsupported PLAID_ENV '{env_name}'. Use one of: {', '.join(ENV_MAP)}.")
+    configuration = plaid.Configuration(
+        host=ENV_MAP[env_name],
+        api_key={
+            "clientId": os.environ["PLAID_CLIENT_ID"],
+            "secret":   os.environ["PLAID_SECRET"],
+        },
+    )
+    return PlaidApi(plaid.ApiClient(configuration))
 
 def load_access_tokens() -> list[str]:
     """Load saved Plaid access tokens from tokens.json."""
@@ -153,26 +147,26 @@ def append_new_transactions(sheet, rows: list[list], existing_index: dict[str, d
     return len(new_rows)
 
 
-def setup_transactions_tab(spreadsheet) -> gspread.Worksheet:
+def setup_transactions_tab(spreadsheet, tab_name) -> gspread.Worksheet:
     """Get or create the Transactions tab with correct headers."""
     try:
-        sheet = spreadsheet.worksheet(TAB_NAME)
+        sheet = spreadsheet.worksheet(tab_name)
     except gspread.WorksheetNotFound:
-        sheet = spreadsheet.add_worksheet(TAB_NAME, rows=5000, cols=10)
+        sheet = spreadsheet.add_worksheet(tab_name, rows=5000, cols=10)
         sheet.append_row(HEADERS, value_input_option="USER_ENTERED")
-        print(f"Created new tab: {TAB_NAME}")
+        print(f"Created new tab: {tab_name}")
     return sheet
 
 
-def setup_manual_tab(spreadsheet) -> gspread.Worksheet:
+def setup_manual_tab(spreadsheet, manual_tab_name: str) -> gspread.Worksheet:
     """
     Get or create the Manual tab for hand-entered cash transactions.
     On first creation, adds headers and usage instructions.
     """
     try:
-        sheet = spreadsheet.worksheet(MANUAL_TAB_NAME)
+        sheet = spreadsheet.worksheet(manual_tab_name)
     except gspread.WorksheetNotFound:
-        sheet = spreadsheet.add_worksheet(MANUAL_TAB_NAME, rows=1000, cols=10)
+        sheet = spreadsheet.add_worksheet(manual_tab_name, rows=1000, cols=10)
         sheet.append_row(HEADERS, value_input_option="USER_ENTERED")
         # Add usage instructions in row 2 as a comment row
         sheet.append_row(
@@ -188,7 +182,7 @@ def setup_manual_tab(spreadsheet) -> gspread.Worksheet:
             ],
             value_input_option="USER_ENTERED",
         )
-        print(f"Created new tab: {MANUAL_TAB_NAME}")
+        print(f"Created new tab: {manual_tab_name}")
     return sheet
 
 
@@ -205,7 +199,7 @@ def generate_manual_id(existing_ids: set[str]) -> str:
             return candidate
         counter += 1
 
-def describe_plaid_error(e: ApiException, account_num: int) -> str:
+def describe_plaid_error(e: ApiException, account_num: int, account_name: str) -> str:
     """Turn a Plaid API error into a short, actionable message."""
     try:
         body = json.loads(e.body)
@@ -214,7 +208,7 @@ def describe_plaid_error(e: ApiException, account_num: int) -> str:
 
     code = body.get("error_code")
     if code == "ITEM_LOGIN_REQUIRED":
-        return f"Account {account_num} needs to be re-linked. Run link.py, then remove the old token."
+        return f"Account {account_num} {account_name} needs to be re-linked. Run link.py, then remove the old token."
     return f"Plaid error {code}: {body.get('error_message')}"
 
 def get_institution_name(plaid_client: PlaidApi, access_token: str, fallback: str) -> str:
@@ -228,15 +222,17 @@ def get_institution_name(plaid_client: PlaidApi, access_token: str, fallback: st
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+    sheet_id        = os.environ["GOOGLE_SHEET_ID"]
+    tab_name        = os.getenv("SHEET_TAB_NAME", "Transactions")
+    manual_tab_name = os.getenv("MANUAL_TAB_NAME", "Manual")
+
     print("Opening Google Sheet…")
-    spreadsheet = gc.open_by_key(SHEET_ID)
+    spreadsheet  = open_spreadsheet(sheet_id)
+    plaid_client = build_plaid_client()
 
-    api_client = plaid.ApiClient(configuration)
-    plaid_client = plaid_api.PlaidApi(api_client)
-
-    # Set up both tabs
-    sheet        = setup_transactions_tab(spreadsheet)
-    manual_sheet = setup_manual_tab(spreadsheet)
+    sheet        = setup_transactions_tab(spreadsheet, tab_name)
+    manual_sheet = setup_manual_tab(spreadsheet, manual_tab_name)
 
     # Build index of existing transactions {txn_id: {row, locked}}
     existing_index = get_sheet_index(sheet)
@@ -250,7 +246,7 @@ def main():
     total_added = 0
     for i, token in enumerate(tokens, 1):
         name = get_institution_name(plaid_client, token, fallback=f"account {i}")
-        print(f"Fetching from account {name} {i} of {len(tokens)}…")
+        print(f"Fetching from account {name} ({i} of {len(tokens)})…")
         try:
             txns  = fetch_transactions(plaid_client, token)
             rows  = transactions_to_rows(txns)
@@ -260,16 +256,12 @@ def main():
             for r in rows:
                 existing_index[r[COL_TRANSACTION_ID - 1]] = {"row": -1, "locked": False}
         except ApiException as e:
-            body = json.loads(e.body)
-            if body.get("error_code") == "ITEM_LOGIN_REQUIRED":
-                print(f"  Account {name} {i} needs to be re-linked. Run link.py, then remove the old token.")
-            else:
-                print(f"  {describe_plaid_error(e, name)}")
+            print(f"  {describe_plaid_error(e, i, name)}")
         except Exception as e:
             print(f"  Error: {e}")
 
-    print(f"\nDone! {total_added} new transactions added to '{TAB_NAME}'.")
-    print(f"Manual entries tab '{MANUAL_TAB_NAME}' is ready for cash transactions.")
+    print(f"\nDone! {total_added} new transactions added to '{tab_name}'.")
+    print(f"Manual entries tab '{manual_tab_name}' is ready for cash transactions.")
 
 
 if __name__ == "__main__":

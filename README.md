@@ -87,7 +87,7 @@ Create a task that runs `python sync.py` daily.
 
 ## Moving to production (real accounts)
 1. In the Plaid dashboard, request **Development** access (free, up to 100 real items)
-2. Change `PLAID_ENV=development` in `.env`
+2. Change `PLAID_ENV=sandbox` in `.env`
 3. Re-run `link.py` to re-link accounts in the new environment
 4. For wider use, apply for **Production** access
 

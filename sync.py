@@ -14,7 +14,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 import plaid
+from plaid import ApiException
 from plaid.api import plaid_api
+from plaid.api.plaid_api import PlaidApi
+from plaid.model.item_get_request import ItemGetRequest
 from plaid.model.transactions_get_request import TransactionsGetRequest
 from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
 
@@ -40,8 +43,7 @@ configuration = plaid.Configuration(
     },
 )
 
-api_client = plaid.ApiClient(configuration)
-plaid_client = plaid_api.PlaidApi(api_client)
+
 
 # ── Google Sheets setup ────────────────────────────────────────────────────────
 
@@ -78,7 +80,7 @@ def load_access_tokens() -> list[str]:
         return []
 
 
-def fetch_transactions(access_token: str, days_back: int = 30) -> list[dict]:
+def fetch_transactions(plaid_client: PlaidApi, access_token: str, days_back: int = 30) -> list[dict]:
     """Fetch transactions for the last `days_back` days from Plaid."""
     start = date.today() - timedelta(days=days_back)
     end   = date.today()
@@ -203,12 +205,34 @@ def generate_manual_id(existing_ids: set[str]) -> str:
             return candidate
         counter += 1
 
+def describe_plaid_error(e: ApiException, account_num: int) -> str:
+    """Turn a Plaid API error into a short, actionable message."""
+    try:
+        body = json.loads(e.body)
+    except (TypeError, ValueError):
+        return f"Plaid error (HTTP {e.status}): {e.reason}"
+
+    code = body.get("error_code")
+    if code == "ITEM_LOGIN_REQUIRED":
+        return f"Account {account_num} needs to be re-linked. Run link.py, then remove the old token."
+    return f"Plaid error {code}: {body.get('error_message')}"
+
+def get_institution_name(plaid_client: PlaidApi, access_token: str, fallback: str) -> str:
+    """Look up the bank's name for a token, or return the fallback if unavailable."""
+    try:
+        item = plaid_client.item_get(ItemGetRequest(access_token=access_token))["item"]
+        return item["institution_name"] or fallback
+    except Exception:
+        return fallback
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     print("Opening Google Sheet…")
     spreadsheet = gc.open_by_key(SHEET_ID)
+
+    api_client = plaid.ApiClient(configuration)
+    plaid_client = plaid_api.PlaidApi(api_client)
 
     # Set up both tabs
     sheet        = setup_transactions_tab(spreadsheet)
@@ -225,15 +249,22 @@ def main():
 
     total_added = 0
     for i, token in enumerate(tokens, 1):
-        print(f"Fetching from account {i} of {len(tokens)}…")
+        name = get_institution_name(plaid_client, token, fallback=f"account {i}")
+        print(f"Fetching from account {name} {i} of {len(tokens)}…")
         try:
-            txns  = fetch_transactions(token)
+            txns  = fetch_transactions(plaid_client, token)
             rows  = transactions_to_rows(txns)
             added = append_new_transactions(sheet, rows, existing_index)
             total_added += added
             # Update index so duplicate IDs across multiple tokens are caught
             for r in rows:
                 existing_index[r[COL_TRANSACTION_ID - 1]] = {"row": -1, "locked": False}
+        except ApiException as e:
+            body = json.loads(e.body)
+            if body.get("error_code") == "ITEM_LOGIN_REQUIRED":
+                print(f"  Account {name} {i} needs to be re-linked. Run link.py, then remove the old token.")
+            else:
+                print(f"  {describe_plaid_error(e, name)}")
         except Exception as e:
             print(f"  Error: {e}")
 

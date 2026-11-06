@@ -11,31 +11,12 @@ connections are made. External dependencies are mocked at the module level so
 sync.py can be imported without live credentials.
 """
 
-import sys
 import unittest
 from datetime import date
 from unittest.mock import MagicMock
+from dotenv import load_dotenv
 
 
-# ── Mock out all external dependencies before importing sync ──────────────────
-# sync.py runs Plaid + Google auth at import time, so we patch those libraries
-# before the import happens to prevent credential errors during testing.
-
-plaid_mock = MagicMock()
-plaid_mock.Environment.Sandbox = "sandbox"
-plaid_mock.Environment.Production = "production"
-sys.modules["plaid"] = plaid_mock
-sys.modules["plaid.api"] = MagicMock()
-sys.modules["plaid.api.plaid_api"] = MagicMock()
-sys.modules["plaid.model.transactions_get_request"] = MagicMock()
-sys.modules["plaid.model.transactions_get_request_options"] = MagicMock()
-sys.modules["gspread"] = MagicMock()
-sys.modules["google"] = MagicMock()
-sys.modules["google.oauth2"] = MagicMock()
-sys.modules["google.oauth2.service_account"] = MagicMock()
-sys.modules["dotenv"] = MagicMock()
-
-import sync
 from sync import (
     append_new_transactions,
     generate_manual_id,

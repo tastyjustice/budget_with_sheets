@@ -14,15 +14,16 @@ sync.py can be imported without live credentials.
 import unittest
 from datetime import date
 from unittest.mock import MagicMock
-from dotenv import load_dotenv
 
-
+from plaid import ApiException
 from sync import (
     append_new_transactions,
     generate_manual_id,
     get_sheet_index,
     transactions_to_rows,
     COL_TRANSACTION_ID,
+    describe_plaid_error,
+    get_institution_name
 )
 
 
@@ -67,6 +68,34 @@ def make_transaction(
             "primary": primary_category,
         },
     }
+
+class FakeClient:
+    """Pretends to be the Plaid client; returns whatever name we give it."""
+    def __init__(self, institution_name):
+        self.institution_name = institution_name
+
+    def item_get(self, request):
+        return {"item": {"institution_name": self.institution_name}}
+
+
+class BrokenClient:
+    """Pretends to be a Plaid client whose lookup fails."""
+    def item_get(self, request):
+        raise Exception("boom")
+
+
+class TestGetInstitutionName(unittest.TestCase):
+    def test_returns_name_when_available(self):
+        name = get_institution_name(FakeClient("Chase"), "token", fallback="account 1")
+        self.assertEqual(name, "Chase")
+
+    def test_falls_back_when_name_is_none(self):
+        name = get_institution_name(FakeClient(None), "token", fallback="account 1")
+        self.assertEqual(name, "account 1")
+
+    def test_falls_back_when_lookup_raises(self):
+        name = get_institution_name(BrokenClient(), "token", fallback="account 1")
+        self.assertEqual(name, "account 1")
 
 
 # ── Tests: get_sheet_index ────────────────────────────────────────────────────
@@ -198,6 +227,17 @@ class TestGetSheetIndex(unittest.TestCase):
         for txn_id in ["txn_010", "txn_011", "txn_012"]:
             with self.subTest(txn_id=txn_id):
                 self.assertIn(txn_id, index)
+
+
+    def _make_error(self, body, status=400, reason="Bad Request"):
+        e = ApiException(status=status, reason=reason)
+        e.body = body          # the raw JSON string Plaid would have sent back
+        return e
+
+    def test_login_required_mentions_relink(self):
+        e = self._make_error('{"error_code": "ITEM_LOGIN_REQUIRED"}')
+        msg = describe_plaid_error(e, 1, "Chase")
+        self.assertIn("re-linked", msg)
 
 
 # ── Tests: append_new_transactions ────────────────────────────────────────────

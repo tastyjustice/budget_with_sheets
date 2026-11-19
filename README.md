@@ -100,4 +100,4 @@ Create a task that runs `python sync.py` daily.
 - All credentials stay on your local machine
 
 ## Running Tests
-pytest tests/ -v
+pytest -v from the repo root, with the venv activated.

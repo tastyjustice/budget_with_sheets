@@ -138,6 +138,7 @@ def append_new_transactions(sheet, rows: list[list], existing_index: dict[str, d
     Rows that exist AND are LOCKED are left completely untouched.
     Rows that exist and are NOT locked are also left alone (already synced, user hasn't edited).
     """
+    #TODO: make sure the integer amounts are converted to floats before uploading into the db
     new_rows = [r for r in rows if r[COL_TRANSACTION_ID - 1] not in existing_index]
     if not new_rows:
         print("  No new transactions to add.")

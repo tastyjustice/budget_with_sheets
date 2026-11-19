@@ -9,8 +9,7 @@ SCHEMA = """
             transaction_id TEXT PRIMARY KEY NOT NULL,
             date TEXT NOT NULL, 
             merchant_name TEXT, 
-            amount INT NOT NULL,
-            amount_cents INTEGER NOT NULL
+            amount_cents INTEGER NOT NULL,
             account_id TEXT NOT NULL, 
             plaid_category TEXT, 
             category TEXT,
@@ -39,7 +38,7 @@ def to_db_row(t: dict) -> dict:
         "date":           t["date"],
         "name":           t["name"],
         "merchant_name":  t.get("merchant_name"),
-        "amount":         t["amount"],
+        "amount_cents":         t["amount"],
         "account_id":     t["account_id"],
         "plaid_category": pfc.get("detailed") or pfc.get("primary"),
     }
@@ -47,13 +46,12 @@ def to_db_row(t: dict) -> dict:
 def upsert_transactions(connection, transactions: list[dict]) -> int:
     sql = """
                  INSERT INTO transactions
-                 (transaction_id, date, merchant_name, amount, amount_cents, account_id, plaid_category, owner)
+                 (transaction_id, date, merchant_name, amount_cents, account_id, plaid_category)
                  VALUES
-                     (:transaction_id, :date, :merchant_name, :amount, :account_id, :plaid_category, :name)
+                     (:transaction_id, :date, :merchant_name, :amount_cents, :account_id, :plaid_category, :name)
                      ON CONFLICT(transaction_id) DO UPDATE SET
                         date           = excluded.date,
                         merchant_name  = excluded.merchant_name,
-                        amount         = excluded.amount,
                         amount_cents   = excluded.amount_cents,
                         account_id     = excluded.account_id,
                         plaid_category = excluded.plaid_category

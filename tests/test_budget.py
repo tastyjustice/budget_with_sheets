@@ -25,6 +25,7 @@ from sync import (
     describe_plaid_error,
     get_institution_name
 )
+from tests.helpers import make_transaction
 
 
 # ── Shared test helpers ───────────────────────────────────────────────────────
@@ -43,31 +44,6 @@ def make_sheet_mock(rows: list[list]) -> MagicMock:
     sheet = MagicMock()
     sheet.get_all_values.return_value = rows
     return sheet
-
-
-def make_transaction(
-        txn_id: str = "txn_001",
-        name: str = "Coffee Shop",
-        merchant_name: str = "Starbucks",
-        amount: float = 5.50,
-        account_id: str = "acct_12345678abcd",
-        date_str: str = "2026-06-01",
-        detailed_category: str = "FOOD_AND_DRINK_COFFEE",
-        primary_category: str = "FOOD_AND_DRINK",
-) -> dict:
-    """Build a minimal Plaid-style transaction dict for testing."""
-    return {
-        "transaction_id": txn_id,
-        "name": name,
-        "merchant_name": merchant_name,
-        "amount": amount,
-        "account_id": account_id,
-        "date": date_str,
-        "personal_finance_category": {
-            "detailed": detailed_category,
-            "primary": primary_category,
-        },
-    }
 
 class FakeClient:
     """Pretends to be the Plaid client; returns whatever name we give it."""

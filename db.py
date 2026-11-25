@@ -11,7 +11,8 @@ SCHEMA = """
             merchant_name TEXT, 
             amount_cents INTEGER NOT NULL,
             account_id TEXT NOT NULL, 
-            plaid_category TEXT, 
+            plaid_primary TEXT,
+            plaid_detailed TEXT,
             category TEXT,
             name TEXT NOT NULL
          );
@@ -38,29 +39,33 @@ def to_db_row(t: dict) -> dict:
         "date":           t["date"],
         "name":           t["name"],
         "merchant_name":  t.get("merchant_name"),
-        "amount_cents":         t["amount"],
+        "amount_cents":   dollars_to_cents(t["amount"]),
         "account_id":     t["account_id"],
-        "plaid_category": pfc.get("detailed") or pfc.get("primary"),
+        "plaid_primary":  pfc.get("primary"),
+        "plaid_detailed": pfc.get("detailed"),
     }
 
 def upsert_transactions(connection, transactions: list[dict]) -> int:
     sql = """
-                 INSERT INTO transactions
-                 (transaction_id, date, merchant_name, amount_cents, account_id, plaid_category)
-                 VALUES
-                     (:transaction_id, :date, :merchant_name, :amount_cents, :account_id, :plaid_category, :name)
-                     ON CONFLICT(transaction_id) DO UPDATE SET
-                        date           = excluded.date,
-                        merchant_name  = excluded.merchant_name,
-                        amount_cents   = excluded.amount_cents,
-                        account_id     = excluded.account_id,
-                        plaid_category = excluded.plaid_category
-                        name           = excluded.name,
-                 """
+      INSERT INTO transactions
+      (transaction_id, date, name, merchant_name, amount_cents, account_id, plaid_primary, plaid_detailed)
+          VALUES
+              (:transaction_id, :date, :name, :merchant_name, :amount_cents, :account_id, :plaid_primary, :plaid_detailed)
+              ON CONFLICT(transaction_id) DO UPDATE SET
+                 date           = excluded.date,
+                 name           = excluded.name,
+                 merchant_name  = excluded.merchant_name,
+                 amount_cents   = excluded.amount_cents,
+                 account_id     = excluded.account_id,
+                 plaid_primary  = excluded.plaid_primary,
+                 plaid_detailed = excluded.plaid_detailed\
+        """
     rows = [to_db_row(t) for t in transactions]
     with connection:
         connection.executemany(sql, rows)
     return len(rows)
 
 def get_all_transactions(conn) -> list[sqlite3.Row]:
-    ...
+    return conn.execute(
+        "SELECT * FROM transactions ORDER BY date DESC, transaction_id"
+    ).fetchall()

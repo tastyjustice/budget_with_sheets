@@ -5,6 +5,7 @@ google_credentials.json
 __pycache__/
 *.pyc
 .idea/
+*.iml
 .DS_Store
 venv/
 .venv/
